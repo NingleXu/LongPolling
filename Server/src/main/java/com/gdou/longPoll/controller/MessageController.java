@@ -16,6 +16,7 @@ public class MessageController {
     // 消息监听
     @GetMapping("/listen")
     public void messageListen(@RequestParam("listenKey") String listenKey, HttpServletResponse response, HttpServletRequest request) {
+        System.out.println("接受到对[" + listenKey + "]的监听请求");
         // 异步处理上下文
         AsyncContext asyncContext = request.startAsync(request, response);
         // 构建任务 以及 异步超时处理

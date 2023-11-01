@@ -4,14 +4,21 @@ import com.gdou.longPoll.config.Config;
 import com.gdou.longPoll.util.MessageAsyncUtil;
 
 import javax.servlet.AsyncContext;
+import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
+import static com.gdou.longPoll.util.MessageAsyncUtil.executorService;
+import static com.gdou.longPoll.util.MessageAsyncUtil.removeLongPollingTask;
 
 public class LongPollingTask implements Runnable {
 
     // 感兴趣的 key
     private String listenKey;
+
+    private String identity;
 
     private AsyncContext asyncContext;
 
@@ -19,11 +26,38 @@ public class LongPollingTask implements Runnable {
 
     @Override
     public void run() {
-        scheduledFuture = MessageAsyncUtil.dealAsyncMessage(asyncContext);
-        // 将自己加入其中，以便被寻找
+        // 超时处理 ，如果超时说明消息是没有被改变的
+        scheduledFuture = dealAyscnTimeOut();
+        // 将自己加入异步请求中
         MessageAsyncUtil.addLongPollingTask(LongPollingTask.this);
     }
 
+    /**
+     * 添加自动的超时处理
+     *
+     * @return
+     */
+    public ScheduledFuture<?> dealAyscnTimeOut() {
+        return executorService.schedule(() -> {
+            // 已经超时 返回结果
+            try {
+                ServletResponse response = asyncContext.getResponse();
+                response.getWriter().write("waiting time out");
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            } finally {
+                asyncContext.complete();
+                // 任务结束就删除
+                removeLongPollingTask(this);
+            }
+        }, 29500, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 监听到key发生改变后 立即响应改变后的结果
+     *
+     * @param key 发生改变的key
+     */
     public void sendResponse(String key) {
         if (null != scheduledFuture) {
             scheduledFuture.cancel(false);
@@ -39,6 +73,8 @@ public class LongPollingTask implements Runnable {
         } catch (IOException e) {
             throw new RuntimeException(e);
         } finally {
+            // 从列表中移除
+            removeLongPollingTask(LongPollingTask.this);
             asyncContext.complete();
         }
     }
@@ -46,6 +82,17 @@ public class LongPollingTask implements Runnable {
     public LongPollingTask(String listenKey, AsyncContext asyncContext) {
         this.listenKey = listenKey;
         this.asyncContext = asyncContext;
+        this.identity = asyncContext.getRequest().getLocalAddr() + ":"
+                + asyncContext.getRequest().getLocalPort() + ":"
+                + listenKey;
+    }
+
+    public String getIdentity() {
+        return identity;
+    }
+
+    public void setIdentity(String identity) {
+        this.identity = identity;
     }
 
     public String getListenKey() {
